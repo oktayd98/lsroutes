@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.base", // no .json extension, like many real configs
+  "compilerOptions": { "strict": true }
+}

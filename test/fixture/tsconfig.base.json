@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig", // a string with // inside must survive comment stripping
+  /* block comment */
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/routes/*": ["src/missing/*", "src/aliased/*"], // longer prefix wins over @/*; first target absent
+      "@tags": ["src/routes/tags.ts"],
+    },
+  },
+}

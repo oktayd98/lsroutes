@@ -1,0 +1,38 @@
+{
+  "name": "lsroutes",
+  "version": "0.1.0",
+  "description": "List every route of an Express project",
+  "keywords": [
+    "express",
+    "routes",
+    "cli",
+    "endpoints"
+  ],
+  "homepage": "https://github.com/oktayd98/lsroutes#readme",
+  "bugs": {
+    "url": "https://github.com/oktayd98/lsroutes/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oktayd98/lsroutes.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "lsroutes": "bin/lsroutes.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "bench": "node bench/run.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.14",
+    "@babel/traverse": "^7.29.14"
+  }
+}
