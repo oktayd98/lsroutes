@@ -3,13 +3,14 @@ const { Kind } = require('../analysis/values');
 const { Express } = require('./express');
 const { Fastify } = require('./fastify');
 const { NestJS } = require('./nestjs');
+const { Hono } = require('./hono');
 
 /**
  * The framework adapters of one analysis run (adapters may keep per-run state, so each run creates its own).
  * To support a new framework: write an adapter extending Framework (framework.js) and add it here.
  */
 function createFrameworks() {
-  return new Frameworks([new Express(), new Fastify(), new NestJS()]);
+  return new Frameworks([new Express(), new Fastify(), new NestJS(), new Hono()]);
 }
 
 class Frameworks {

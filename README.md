@@ -1,6 +1,6 @@
 # lsroutes
 
-List every endpoint of an Express, Fastify or NestJS project, like `rails routes`.
+List every endpoint of an Express, Fastify, NestJS or Hono project, like `rails routes`.
 
 ```
 $ npx lsroutes
@@ -25,7 +25,7 @@ Express and Fastify have no standard folder layout (and NestJS controllers can l
 
 ## Usage
 
-Run it in the root of an Express, Fastify or NestJS project (JavaScript or TypeScript):
+Run it in the root of an Express, Fastify, NestJS or Hono project (JavaScript or TypeScript):
 
 ```sh
 npx lsroutes              # scan the current directory
@@ -82,6 +82,13 @@ For NestJS it reads the decorators from `@nestjs/common`:
 - `app.setGlobalPrefix('api', { exclude: [...] })`, with exclude rules as strings or `{ path, method }` and path-to-regexp patterns (`:id`, `(.*)`, `{/*splat}`)
 - URI versioning: `app.enableVersioning({ type: VersioningType.URI, defaultVersion, prefix })`, `@Version('2')`, version arrays and `VERSION_NEUTRAL`
 - one bootstrap file (`main.ts`) per app: in a monorepo, each controller takes the prefix and versioning of the bootstrap file in the nearest directory
+
+For Hono it understands:
+
+- `new Hono()` from `hono`, `hono/tiny` or `hono/quick`, with `app.get(path, ...handlers)`, `app.all()` and `app.on(method, path, ...handlers)`, also with arrays of methods and paths
+- chains, including routes that reuse the previous path (`app.get('/items', list).post(create)`)
+- `app.route('/users', users)` mounts, chained too (`const routes = app.route('/a', a).route('/b', b)`)
+- `app.basePath('/api')`, also chained (`new Hono().basePath('/api')`) and nested
 
 ### Grouping
 
@@ -143,21 +150,41 @@ A cached run of any of them takes about 0.1 s.
 
 - **Handler** shows the last handler passed to the route (`usersController.list`, `UserController#me` for `this.me` inside a class, or for a NestJS controller method). Inline functions (`(req, res) => ...`, `function (req, res) {...}`) show as *function*, in italics on terminals that support it.
 - A prefix that can't be known without running the app (`app.use(process.env.PREFIX, router)`) is shown as a placeholder: `{process.env.PREFIX}/users`.
-- If a router is never mounted, or its mount can't be resolved, its routes are still listed without a prefix. When the project has an `express()` app, a warning is also printed on stderr. Without one (e.g. a package that only exports routers) there is nothing to mount on, so no warning is printed.
+- If a router is never mounted, or its mount can't be resolved, its routes are still listed without a prefix. When the project has an app (an `express()` app, a Fastify instance, a NestJS controller or a Hono app), a warning is also printed on stderr for an unmounted Express router or Fastify plugin. Without one (e.g. a package that only exports routers) there is nothing to mount on, so no warning is printed.
 
 ## Limitations
 
-- Express, Fastify and NestJS only (JavaScript and TypeScript). Other decorator-based frameworks like `routing-controllers` are not supported yet.
-- NestJS: `RouterModule.register()` module prefixes are not applied, controllers declared through custom decorators (`applyDecorators(Controller(...))`) are not found, and a controller is listed even if no module registers it. The `host` option is ignored.
+General:
+
+- Express, Fastify, NestJS and Hono only (JavaScript and TypeScript). Other frameworks (Koa, `routing-controllers`, ...) are not supported yet.
 - Routes registered dynamically are missed: routers stored under computed keys and registered through `Object.entries(...)`, or passed through project-specific wrappers that change the prefix. On the largest Fastify backend we tested, which does this for its integrations, about 85% of `route()` declarations are listed.
-- Path aliases are read from the nearest `tsconfig.json` / `jsconfig.json`. Bundler-only aliases (webpack, Vite) and `package.json` `imports` (`#routes/*`) are not resolved.
 - Method names computed at runtime (`router[method](...)`) are not detected.
-- Fastify apps started only through `fastify-cli` (`fastify start app.js`, with no `Fastify()` call in the code) are not supported yet: the root plugin is never registered in code, so its routes are not found.
-- A router created in a shared base class (`class BaseController { router = Router() }`) is treated as one router for all subclasses, so each subclass's routes also appear under the other subclasses' mount paths. Routers created in each subclass (or its constructor) are fine.
-- Routes are listed group by group, in the order the analysis meets them (files alphabetically, then source order). This can differ from the order the framework matches them in.
+- Values passed to a parent constructor are not followed: in `class AdminRoutes extends Base { constructor(app) { super(app); } }`, `app` inside `Base` is unknown.
 - Conditionally registered routes (`if (env === 'development')`) are always listed.
+- Routes are listed group by group, in the order the analysis meets them (files alphabetically, then source order). This can differ from the order the framework matches them in.
+- Path aliases are read from the nearest `tsconfig.json` / `jsconfig.json`. Bundler-only aliases (webpack, Vite), `package.json` `imports` (`#routes/*`) and workspace packages imported by name (`import users from '@acme/routes'`, unless a tsconfig path maps it) are not resolved.
+- In a monorepo, the routes of every app are listed in one table; the Source column tells which app a route belongs to.
+- Files Babel cannot parse are skipped with a warning. One known case: a decorator on a class property with a computed name (`@Type(() => X) [KEY]: X`).
 - To keep memory low, calls are ruled out from their shape before anything is resolved (see [Memory](#memory)). This misses a few rare patterns: a route path that is a string not starting with `/` or `*`, `route.get(handler)` on a `router.route('/x')` result imported from another file, and a function passed as a value into a file that does not import it and called there (`mountAll(app, [users])` calling `users(app)` in a helper file).
+
+Express:
+
+- A router created in a shared base class (`class BaseController { router = Router() }`) is treated as one router for all subclasses, so each subclass's routes also appear under the other subclasses' mount paths. Routers created in each subclass (or its constructor) are fine.
 - Routers from other packages (`express-promise-router`, etc.) are not detected.
+
+Fastify:
+
+- Apps started only through `fastify-cli` (`fastify start app.js`, with no `Fastify()` call in the code) are not supported yet: the root plugin is never registered in code, so its routes are not found.
+
+NestJS:
+
+- `RouterModule.register()` module prefixes are not applied, controllers declared through custom decorators (`applyDecorators(Controller(...))`) are not found, and a controller is listed even if no module registers it. The `host` option is ignored.
+- In a monorepo, an app without its own `setGlobalPrefix()` / `enableVersioning()` takes those of the bootstrap file in the nearest directory, even when that belongs to another app.
+
+Hono:
+
+- `OpenAPIHono` (`@hono/zod-openapi`, `app.openapi(createRoute(...), handler)`), apps made by `createFactory().createApp()` and other apps mounted with `app.mount()` are not supported yet.
+- A Hono app that is never mounted is listed without a prefix and without a warning, since a sub-app is a full app too.
 
 ## Development
 
@@ -183,13 +210,13 @@ src/analysis/
   members.js, modules.js rules for `x.name` and for imports, require() and exports
   routers.js             the app/router/plugin model
   collector.js           finds app.get(), router.use() ... calls and records them on routers
-src/frameworks/          one adapter per framework (express.js, fastify.js, nestjs.js), see framework.js for the hooks
+src/frameworks/          one adapter per framework (express.js, fastify.js, nestjs.js, hono.js), see framework.js for the hooks
 src/report/groups.js     full paths from the mount tree, grouping, warnings
 ```
 
 The rule modules only call back into the resolver, never into each other, so each one can be read on its own. To support a new kind of expression, add a rule to the table in `expressions.js`; to support a new kind of value, add it to `values.js`.
 
-Nothing outside `src/frameworks/` names a framework. An adapter tells the core what its packages are (`express`, `fastify`, `@nestjs/common`), what calling or instantiating them creates, what a method called on one of its routers returns, and which of those calls define routes or mount routers. Frameworks whose routes are not method calls (NestJS decorators) collect them in a pass over the whole project (`collectProject`). To support another framework, write an adapter extending `Framework` in `src/frameworks/framework.js` and add it to `createFrameworks()` in `src/frameworks/index.js`.
+Nothing outside `src/frameworks/` names a framework. An adapter tells the core what its packages are (`express`, `fastify`, `@nestjs/common`, `hono`), what calling or instantiating them creates, what a method called on one of its routers returns, and which of those calls define routes or mount routers. Frameworks whose routes are not method calls (NestJS decorators) collect them in a pass over the whole project (`collectProject`). To support another framework, write an adapter extending `Framework` in `src/frameworks/framework.js` and add it to `createFrameworks()` in `src/frameworks/index.js`.
 
 ## License
 

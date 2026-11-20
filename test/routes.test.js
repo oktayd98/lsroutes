@@ -228,3 +228,38 @@ test('lists routes of the NestJS fixture project', () => {
 12 routes
 `);
 });
+
+test('lists routes of the Hono fixture project', () => {
+  const r = spawnSync(process.execPath, [path.join(__dirname, '../bin/lsroutes.js'), path.join(__dirname, 'hono-fixture'), '--no-cache'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, FORCE_COLOR: '', NO_COLOR: '1' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stderr, '');
+  // every expected route is commented next to its declaration in test/hono-fixture
+  assert.strictEqual(withoutTiming(r.stdout), `\
+┌────────┬─────────────────────┬────────────┬───────────────────────┐
+│ Method │ Path                │ Handler    │ Source                │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ GET    │ /api/health         │ function   │ src/index.ts:10       │
+│ GET    │ /api/items          │ listItems  │ src/index.ts:13       │
+│ POST   │ /api/items          │ createItem │ src/index.ts:14       │
+│ PURGE  │ /api/cache          │ purgeCache │ src/index.ts:16       │
+│ PUT    │ /api/a              │ both       │ src/index.ts:17       │
+│ PUT    │ /api/b              │ both       │ src/index.ts:17       │
+│ DELETE │ /api/a              │ both       │ src/index.ts:17       │
+│ DELETE │ /api/b              │ both       │ src/index.ts:17       │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ GET    │ /api/users          │ function   │ src/routes/users.ts:4 │
+│ GET    │ /api/users/:id      │ showUser   │ src/routes/users.ts:5 │
+│ DELETE │ /api/users/:id      │ deleteUser │ src/routes/users.ts:6 │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ GET    │ /api/posts          │ listPosts  │ src/routes/posts.ts:4 │
+│ POST   │ /api/posts          │ createPost │ src/routes/posts.ts:5 │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ GET    │ /api/admin/v1/stats │ stats      │ src/routes/admin.ts:5 │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ GET    │ /api/admin/ping     │ ping       │ src/routes/admin.ts:6 │
+├────────┼─────────────────────┼────────────┼───────────────────────┤
+│ PATCH  │ /lonely             │ h          │ src/orphan.ts:5       │
+└────────┴─────────────────────┴────────────┴───────────────────────┘
+16 routes
+`);
+});

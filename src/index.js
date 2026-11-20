@@ -1,6 +1,6 @@
 'use strict';
 /**
- * lsroutes: lists the routes of an Express, Fastify or NestJS project by static analysis. Nothing from the project is executed.
+ * lsroutes: lists the routes of an Express, Fastify, NestJS or Hono project by static analysis. Nothing from the project is executed.
  *
  *   files      find the source files            project/files.js
  *   parse      parse them, resolve imports       project/project.js, project/pathAliases.js
