@@ -1,6 +1,6 @@
 # lsroutes
 
-List every endpoint of an Express project, like `rails routes`.
+List every endpoint of an Express or Fastify project, like `rails routes`.
 
 ```
 $ npx lsroutes
@@ -21,11 +21,11 @@ $ npx lsroutes
 8 routes
 ```
 
-Express has no standard folder layout, so `lsroutes` doesn't guess from file names. It reads the code and follows your routers wherever they are defined and mounted, then prints each endpoint with its full path, its handler and the file and line where it is declared.
+Express and Fastify have no standard folder layout, so `lsroutes` doesn't guess from file names. It reads the code and follows your routers wherever they are defined and mounted, then prints each endpoint with its full path, its handler and the file and line where it is declared.
 
 ## Usage
 
-Run it in the root of an Express project (JavaScript or TypeScript):
+Run it in the root of an Express or Fastify project (JavaScript or TypeScript):
 
 ```sh
 npx lsroutes              # scan the current directory
@@ -67,6 +67,14 @@ It parses every `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.mts`, `.cts` and `.tsx` 
 - class-based controllers (`this.router = Router()`, `app.use('/', new UserController().router)`)
 - route tables mounted in a loop (`routes.forEach(r => router.use(r.path, r.router))`, `for...of`)
 
+For Fastify it also understands:
+
+- shorthand routes (`fastify.get(path, [options], handler)`) and full declarations (`fastify.route({ method, url, handler })`, including method arrays)
+- plugins: `fastify.register(plugin, { prefix })`, nested to any depth, with the plugin passed as a function, an import, `import('./routes.js')` or `require()`
+- `fastify-plugin` (`fp(plugin)`): no encapsulation, so the `prefix` option does not apply, as in Fastify
+- `@fastify/autoload` with its rules: directory names as prefixes, index files, `autohooks` files, `autoPrefix` / `prefixOverride` exports, `options.prefix`, `dirNameRoutePrefix`, `routeParams` and `ignorePattern`; `dir` can be `path.join(__dirname, 'routes')`, `import.meta.dirname` or `fileURLToPath(new URL(...))`
+- instance methods that return the instance (`fastify().withTypeProvider()`, `addHook`, `decorate`, ...)
+
 ### Grouping
 
 Routes are grouped by the router that defines them, mounted at a given prefix. A router file is a group, whatever it is named and wherever it lives. Within one router, routes are split again by their first static path segment (`/users/...` vs `/posts/...`), so an app that defines everything on a single `app` still gets readable groups. Parameters such as `:id` don't start a new group, and one-route segments of the same router share a group.
@@ -77,10 +85,10 @@ The result is cached in your OS temp directory. The cache key is a hash of every
 
 ### Skipped files
 
-- Directories: `node_modules`, `bower_components`, `jspm_packages`, `vendor`, `dist`, `build`, `out`, `coverage`, `__tests__` and any directory starting with `.`
+- Directories: `node_modules`, `bower_components`, `jspm_packages`, `vendor`, `dist`, `build`, `out`, `coverage`, `__tests__`, `test`, `tests` and any directory starting with `.`
 - Files: `*.test.*`, `*.spec.*`, `*.d.ts`, `*.min.js`
 
-Test files are skipped because they often create throwaway apps.
+Test files and directories are skipped because they often create throwaway apps (a test helper registering the app's plugins on a second instance would list every route twice).
 
 ## Benchmark
 
@@ -103,7 +111,17 @@ Results on an Apple M4, Node 24 (median of 5 runs):
 |---|---|---|---|---|
 | synthetic benchmark | 1,479 (32,713 lines) | 1,000 | 1.36 s | 0.09 s |
 
-On real projects: about 2.7 s cold and 0.1 s cached for an app with 420 routes in ~1,900 files, and about 0.3 s cold for apps with under 100 routes.
+On open-source projects (cold, `--no-cache`):
+
+| Project | Framework | Routes | Cold |
+|---|---|---|---|
+| large backend, plugins nested several levels | Fastify | 1,497 | 7.9 s |
+| server API in a monorepo | Fastify | 571 | 1.8 s |
+| storage API | Fastify | 128 | 1.4 s |
+| small REST API | Fastify | 69 | 0.2 s |
+| demo app | Fastify (autoload) | 14 | 0.1 s |
+
+A cached run of any of them takes about 0.1 s.
 
 `RUNS=10 npm run bench` changes the number of runs.
 
@@ -115,11 +133,13 @@ On real projects: about 2.7 s cold and 0.1 s cached for an app with 420 routes i
 
 ## Limitations
 
-- Express only (JavaScript and TypeScript). Decorator-based frameworks like NestJS or `routing-controllers` are not supported.
+- Express and Fastify only (JavaScript and TypeScript). Decorator-based frameworks like NestJS or `routing-controllers` are not supported yet.
+- Routes registered dynamically are missed: routers stored under computed keys and registered through `Object.entries(...)`, or passed through project-specific wrappers that change the prefix. On the largest Fastify backend we tested, which does this for its integrations, about 85% of `route()` declarations are listed.
 - Path aliases are read from the nearest `tsconfig.json` / `jsconfig.json`. Bundler-only aliases (webpack, Vite) and `package.json` `imports` (`#routes/*`) are not resolved.
 - Method names computed at runtime (`router[method](...)`) are not detected.
+- Fastify apps started only through `fastify-cli` (`fastify start app.js`, with no `Fastify()` call in the code) are not supported yet: the root plugin is never registered in code, so its routes are not found.
 - A router created in a shared base class (`class BaseController { router = Router() }`) is treated as one router for all subclasses, so each subclass's routes also appear under the other subclasses' mount paths. Routers created in each subclass (or its constructor) are fine.
-- Routes are listed group by group, in the order the analysis meets them (files alphabetically, then source order). This can differ from the order Express matches them in.
+- Routes are listed group by group, in the order the analysis meets them (files alphabetically, then source order). This can differ from the order the framework matches them in.
 - Conditionally registered routes (`if (env === 'development')`) are always listed.
 - Routers from other packages (`express-promise-router`, etc.) are not detected.
 
@@ -145,12 +165,15 @@ src/analysis/
   expressions.js         rules per expression type (calls, members, strings, ...)
   dataflow.js            rules for variables, parameters, returns and arrays
   members.js, modules.js rules for `x.name` and for imports, require() and exports
-  routers.js             the app/router model and the route methods
+  routers.js             the app/router/plugin model
   collector.js           finds app.get(), router.use() ... calls and records them on routers
+src/frameworks/          one adapter per framework (express.js, fastify.js), see framework.js for the hooks
 src/report/groups.js     full paths from the mount tree, grouping, warnings
 ```
 
 The rule modules only call back into the resolver, never into each other, so each one can be read on its own. To support a new kind of expression, add a rule to the table in `expressions.js`; to support a new kind of value, add it to `values.js`.
+
+Nothing outside `src/frameworks/` names a framework. An adapter tells the core what its packages are (`express`, `fastify`), what calling or instantiating them creates, what a method called on one of its routers returns, and which of those calls define routes or mount routers. To support another framework, write an adapter extending `Framework` in `src/frameworks/framework.js` and add it to `createFrameworks()` in `src/frameworks/index.js`.
 
 ## License
 

@@ -33,8 +33,8 @@ function buildReport(routers) {
   const hasApp = roots.some((router) => router.kind === 'app');
   const warnings = [];
   for (const root of roots) {
-    if (hasApp && root.kind === 'router' && root.entries.length) {
-      warnings.push(`warning: router at ${root.location} is not mounted on any app (or the mount could not be resolved); its paths are shown without a prefix`);
+    if (hasApp && root.kind !== 'app' && root.entries.length) {
+      warnings.push(`warning: ${root.kind} at ${root.location} is not mounted on any app (or the mount could not be resolved); its paths are shown without a prefix`);
     }
     visit(root, '/', new Set());
   }

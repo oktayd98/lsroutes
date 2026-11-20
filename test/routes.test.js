@@ -151,5 +151,43 @@ routers.forEach((r) => app.use('/users', r));
   // lsroutes' own source hit the same bug through `[...resolve(a), ...resolve(b)]`
   const own = cli(path.join(__dirname, '../bin'));
   assert.strictEqual(own.status, 0, own.stderr);
-  assert.strictEqual(own.stdout, 'No Express routes found.\n');
+  assert.strictEqual(own.stdout, 'No routes found.\n');
+});
+
+test('lists routes of the Fastify fixture project', () => {
+  const r = spawnSync(process.execPath, [path.join(__dirname, '../bin/lsroutes.js'), path.join(__dirname, 'fastify-fixture'), '--no-cache'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, FORCE_COLOR: '', NO_COLOR: '1' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stderr, '');
+  // every expected route is commented next to its declaration in test/fastify-fixture
+  assert.strictEqual(r.stdout, `\
+┌────────┬───────────────────┬───────────────┬─────────────────────────────────┐
+│ Method │ Path              │ Handler       │ Source                          │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /health           │ function      │ src/server.ts:10                │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /status           │ statusHandler │ src/server.ts:11                │
+│ HEAD   │ /status           │ statusHandler │ src/server.ts:11                │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /users            │ listUsers     │ src/plugins/users.ts:4          │
+│ GET    │ /users/:id        │ showUser      │ src/plugins/users.ts:5          │
+│ POST   │ /users            │ createUser    │ src/plugins/users.ts:6          │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ DELETE │ /users/nested/:id │ removeUser    │ src/plugins/users.ts:8          │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ POST   │ /admin/reindex    │ function      │ src/plugins/admin.js:2          │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /shared           │ sharedHandler │ src/server.ts:15                │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ PUT    │ /esm/item         │ putItem       │ src/plugins/esm.js:2            │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /api/custom/x     │ customHandler │ src/routes/custom.ts:3          │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /api              │ rootHandler   │ src/routes/root.ts:2            │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /api/books/:id    │ showBook      │ src/routes/books/_id/index.ts:2 │
+├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
+│ GET    │ /api/books        │ listBooks     │ src/routes/books/index.ts:2     │
+└────────┴───────────────────┴───────────────┴─────────────────────────────────┘
+14 routes
+`);
 });

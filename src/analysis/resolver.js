@@ -22,12 +22,20 @@ const MAX_DEPTH = 150;
  * so every step goes through guard(), which cuts cycles, caps the depth and memoizes results.
  */
 class Resolver {
-  constructor(project) {
+  /**
+   * @param {import('../project/project').Project} project
+   * @param {object} frameworks the framework adapters, see frameworks/index.js
+   */
+  constructor(project, frameworks) {
     this.project = project;
+    this.frameworks = frameworks;
     this.routers = new RouterRegistry(project);
     this.memo = new Map(); // without it, code like jQuery re-resolves the same chains exponentially
     this.inProgress = new Set(); // keys being resolved right now: meeting one again means a cycle
-    this.cycleCuts = 0; // a result computed while a cycle was cut may be partial, so it is not memoized
+    this.cycleCuts = 0; // a result computed while a cycle was cut may be partial, so it is not memoized...
+    // ...but it is reused until the outermost question is answered: in a cyclic call graph (services passing
+    // `log` to each other) recomputing it at every visit is exponential
+    this.provisional = new Map();
     this.loopElements = new Map(); // loop variable node -> [the one element being processed], see withLoopElement
     this.callers = null; // function node -> call and new expressions invoking it, built on first use
   }
@@ -53,6 +61,11 @@ class Resolver {
   /** Route paths an argument can be (`'/a'`, `['/a', '/b']`, a constant, a regex), or null if it is not a path. */
   routePaths(path) {
     return expressions.routePaths(this, path);
+  }
+
+  /** How an unknown value is shown: its source code in braces, `{config.prefix}`. */
+  placeholder(path) {
+    return expressions.placeholder(this, path);
   }
 
   member(values, name) {
@@ -84,9 +97,14 @@ class Resolver {
     return modules.importValues(this, specifierPath);
   }
 
-  /** The app or router created by the expression at `creationPath`. */
-  router(kind, creationPath) {
-    return this.routers.at(kind, creationPath);
+  /** The app, router or plugin instance created by the code at `creationPath`, owned by `framework`. */
+  router(framework, kind, creationPath) {
+    return this.routers.at(framework, kind, creationPath);
+  }
+
+  /** Forgets memoized results, for indexes that resolved expressions while they were half-built (see indexCallers). */
+  clearMemo() {
+    this.memo.clear();
   }
 
   /** Call and new expressions that invoke a function (or a class, through its constructor). */
@@ -124,6 +142,10 @@ class Resolver {
     }
     if (this.loopElements.size) return this.computeUncached(key, compute); // results differ per loop element
     if (this.memo.has(key)) return this.memo.get(key);
+    if (this.provisional.has(key)) {
+      this.cycleCuts++; // still partial: whatever is built on it is partial too
+      return this.provisional.get(key);
+    }
     if (this.inProgress.has(key)) {
       this.cycleCuts++;
       return [];
@@ -133,9 +155,11 @@ class Resolver {
     try {
       const values = compute();
       if (this.cycleCuts === cutsBefore) this.memo.set(key, values);
+      else this.provisional.set(key, values);
       return values;
     } finally {
       this.inProgress.delete(key);
+      if (!this.inProgress.size) this.provisional.clear(); // the outermost question is answered
     }
   }
 

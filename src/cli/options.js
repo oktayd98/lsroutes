@@ -2,7 +2,7 @@
 
 const HELP = `Usage: lsroutes [dir] [options]
 
-List every route of an Express project, like \`rails routes\`.
+List every route of an Express or Fastify project, like \`rails routes\`.
 The project is analyzed statically: your app is never started.
 
 Arguments:

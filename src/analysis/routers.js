@@ -1,17 +1,14 @@
 'use strict';
-const http = require('http');
-
-/** Methods that define a route on an Express app or router: get, post, ..., and all. */
-const ROUTE_METHODS = new Set([...http.METHODS.map((method) => method.toLowerCase()), 'all']);
 
 /**
- * An Express app (`express()`) or router (`Router()`) found in the analyzed code, with the routes defined
- * on it and the routers mounted on it, in the order they were found.
+ * An app, router or plugin instance found in the analyzed code (`express()`, `Router()`, a Fastify plugin),
+ * with the routes defined on it and the routers mounted on it, in the order they were found.
  */
 class RouterNode {
-  constructor(id, kind, location) {
+  constructor(id, framework, kind, location) {
     this.id = id;
-    this.kind = kind; // 'app' or 'router'
+    this.framework = framework; // name of the adapter that interprets calls on it, see frameworks/
+    this.kind = kind; // 'app' (a root), 'router' or 'plugin'
     this.location = location; // "file:line" where it is created
     this.entries = []; // { type: 'route', method, path, handler, location } | { type: 'mount', router, prefix }
     this.mounted = false; // true once another app or router mounts it with use()
@@ -37,11 +34,11 @@ class RouterRegistry {
     this.byCreation = new Map(); // creation node -> RouterNode
   }
 
-  /** The app or router created by the expression at `creationPath`. */
-  at(kind, creationPath) {
+  /** The app or router created by the code at `creationPath` (a call, or a Fastify plugin function). */
+  at(framework, kind, creationPath) {
     let router = this.byCreation.get(creationPath.node);
     if (!router) {
-      router = new RouterNode(this.byCreation.size, kind, this.project.location(creationPath));
+      router = new RouterNode(this.byCreation.size, framework, kind, this.project.location(creationPath));
       this.byCreation.set(creationPath.node, router);
     }
     return router;
@@ -52,4 +49,4 @@ class RouterRegistry {
   }
 }
 
-module.exports = { ROUTE_METHODS, RouterNode, RouterRegistry };
+module.exports = { RouterNode, RouterRegistry };

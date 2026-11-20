@@ -1,11 +1,12 @@
 'use strict';
 /**
- * lsroutes: lists the routes of an Express project by static analysis. Nothing from the project is executed.
+ * lsroutes: lists the routes of an Express or Fastify project by static analysis. Nothing from the project is executed.
  *
  *   files      find the source files            project/files.js
  *   parse      parse them, resolve imports       project/project.js, project/pathAliases.js
  *   collect    find routes, routers and mounts   analysis/collector.js, with analysis/resolver.js answering
- *                                                "what is this expression?" for every argument and receiver
+ *                                                "what is this expression?" for every argument and receiver,
+ *                                                and frameworks/ giving each framework's API its meaning
  *   report     full paths, groups, warnings      report/groups.js
  */
 const fs = require('fs');
@@ -13,6 +14,7 @@ const path = require('path');
 const { findProjectFiles, isConfigFile } = require('./project/files');
 const { Project } = require('./project/project');
 const { Resolver } = require('./analysis/resolver');
+const { createFrameworks } = require('./frameworks');
 const { RouteCollector } = require('./analysis/collector');
 const { buildReport } = require('./report/groups');
 const { cacheKey, readCache, writeCache } = require('./cache');
@@ -39,7 +41,7 @@ function analyze(root, filePaths, contents) {
   filePaths.forEach((filePath, i) => {
     if (!isConfigFile(path.basename(filePath))) project.addSource(filePath, contents[i]);
   });
-  const resolver = new Resolver(project);
+  const resolver = new Resolver(project, createFrameworks());
   new RouteCollector(resolver).collect();
   const report = buildReport(resolver.routers.all());
   return { groups: report.groups, warnings: [...project.warnings, ...report.warnings] };

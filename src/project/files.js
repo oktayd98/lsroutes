@@ -6,7 +6,7 @@ const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs',
 
 // dependencies, build output and tests (tests often create throwaway apps)
 const SKIPPED_DIRECTORIES = new Set([
-  'node_modules', 'bower_components', 'jspm_packages', 'vendor', 'dist', 'build', 'coverage', 'out', '__tests__',
+  'node_modules', 'bower_components', 'jspm_packages', 'vendor', 'dist', 'build', 'coverage', 'out', '__tests__', 'test', 'tests',
 ]);
 // test files, type declarations and minified bundles
 const SKIPPED_FILES = /\.(test|spec)\.[cm]?[jt]sx?$|\.d\.[cm]?ts$|\.min\.[cm]?js$/;

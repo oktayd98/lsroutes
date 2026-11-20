@@ -1,9 +1,10 @@
 {
   "name": "lsroutes",
   "version": "0.1.0",
-  "description": "List every route of an Express project",
+  "description": "List every route of an Express or Fastify project, like `rails routes`",
   "keywords": [
     "express",
+    "fastify",
     "routes",
     "cli",
     "endpoints"

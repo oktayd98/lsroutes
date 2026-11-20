@@ -23,7 +23,7 @@ if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) fail(`${option
 
 const { groups, warnings } = listRoutes(root, { cache: options.cache });
 for (const warning of warnings) console.error(warning);
-if (!groups.length) console.log('No Express routes found.');
+if (!groups.length) console.log('No routes found.');
 else process.stdout.write(renderTable(groups, { color: shouldUseColor(options.colorFlag, process.env, process.stdout) }));
 
 function fail(message) {

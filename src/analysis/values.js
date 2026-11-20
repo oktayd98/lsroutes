@@ -9,9 +9,8 @@
  */
 
 const Kind = Object.freeze({
-  EXPRESS: 'express', // the express module itself: express() creates an app
-  ROUTER_FACTORY: 'routerFactory', // express.Router: calling it creates a router
-  ROUTER: 'router', // an app or router instance, see routers.js
+  FRAMEWORK: 'framework', // something a framework adapter gives meaning to (express, express.Router, ...), see frameworks/
+  ROUTER: 'router', // an app, router or plugin instance, see routers.js
   ROUTE: 'route', // router.route('/path'): methods called on it add routes at that path
   STRING: 'string',
   FUNCTION: 'function',
@@ -22,13 +21,10 @@ const Kind = Object.freeze({
   OBJECT: 'object', // an object literal
 });
 
-const EXPRESS = Object.freeze({ kind: Kind.EXPRESS });
-const ROUTER_FACTORY = Object.freeze({ kind: Kind.ROUTER_FACTORY });
-
 // Paths below are Babel NodePaths pointing at the code that defines the value.
 const Value = {
-  express: () => EXPRESS,
-  routerFactory: () => ROUTER_FACTORY,
+  /** `symbol` names the thing within the framework ('Router'); adapters may add fields. */
+  framework: (framework, symbol, fields) => Object.freeze({ kind: Kind.FRAMEWORK, framework, symbol, ...fields }),
   router: (router) => ({ kind: Kind.ROUTER, router }),
   route: (router, path) => ({ kind: Kind.ROUTE, router, path }),
   string: (value) => ({ kind: Kind.STRING, value }),

@@ -3,11 +3,12 @@
 const { Value } = require('./values');
 const { nameOf, propertyName, isModuleExports } = require('./ast');
 
-/** `import x from`, `import { x } from`, `import * as x from`: express itself or a project file's export. */
+/** `import x from`, `import { x } from`, `import * as x from`: a framework package or a project file's export. */
 function importValues(resolver, specifier) {
   const source = specifier.parent.source.value;
   const importedName = specifier.isImportSpecifier() ? nameOf(specifier.node.imported) : null;
-  if (source === 'express') return importedName ? resolver.member([Value.express()], importedName) : [Value.express()];
+  const frameworkPackage = resolver.frameworks.packageValue(source);
+  if (frameworkPackage) return importedName ? resolver.member([frameworkPackage], importedName) : [frameworkPackage];
   const file = resolver.project.resolveImport(resolver.project.fileOf(specifier).filePath, source);
   if (!file) return [];
   if (specifier.isImportNamespaceSpecifier()) return [Value.module(file)];

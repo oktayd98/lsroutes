@@ -12,7 +12,7 @@ function memberOf(resolver, values, name) {
 }
 
 const RULES = {
-  [Kind.EXPRESS]: (resolver, express, name) => (name === 'Router' ? [Value.routerFactory()] : []),
+  [Kind.FRAMEWORK]: (resolver, value, name) => resolver.frameworks.of(value).member(resolver, value, name),
   [Kind.MODULE]: (resolver, module, name) => resolver.exportOf(module.file, name),
   [Kind.INSTANCE]: (resolver, instance, name) => instanceMember(resolver, instance.classDeclaration, name),
   [Kind.OBJECT]: objectProperty,

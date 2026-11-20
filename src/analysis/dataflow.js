@@ -48,11 +48,15 @@ function destructure(resolver, pattern, name, values) {
   return property ? resolver.member(values, keyName(property)) : [];
 }
 
-/** Arguments a parameter receives: from every call site, or the elements of `array` for `array.forEach(item => ...)`. */
+/**
+ * Arguments a parameter receives: from every call site, or the elements of `array` for `array.forEach(item => ...)`,
+ * plus what frameworks pass to functions they call (a Fastify plugin gets its instance).
+ */
 function parameterValues(resolver, fn, index) {
+  const fromFrameworks = resolver.frameworks.parameterValues(resolver, fn, index);
   const iterated = index === 0 && arrayIteratedBy(fn);
-  if (iterated) return resolver.elements(resolver.resolve(iterated));
-  return resolver.callersOf(fn).flatMap((call) => resolver.resolve(call.get(`arguments.${index}`)));
+  if (iterated) return [...fromFrameworks, ...resolver.elements(resolver.resolve(iterated))];
+  return [...fromFrameworks, ...resolver.callersOf(fn).flatMap((call) => resolver.resolve(call.get(`arguments.${index}`)))];
 }
 
 /** What a function returns: its expression body, or the arguments of its return statements (not those of nested functions). */

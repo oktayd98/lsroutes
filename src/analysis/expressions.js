@@ -1,7 +1,6 @@
 'use strict';
 // Rules: what each kind of expression evaluates to. One small rule per Babel node type.
 const { Kind, Value, isRouteTarget } = require('./values');
-const { ROUTE_METHODS } = require('./routers');
 const { propertyName, enclosingClass } = require('./ast');
 
 /** @returns {object[]} values, see values.js */
@@ -77,7 +76,7 @@ function resolveMember(resolver, path) {
 function resolveNew(resolver, path) {
   return resolver.resolve(path.get('callee')).flatMap((callee) => {
     if (callee.kind === Kind.CLASS) return [Value.instance(callee.declaration)];
-    if (callee.kind === Kind.ROUTER_FACTORY) return [Value.router(resolver.router('router', path))];
+    if (callee.kind === Kind.FRAMEWORK) return resolver.frameworks.of(callee).construct(resolver, callee, path);
     return [];
   });
 }
@@ -90,20 +89,24 @@ function resolveNew(resolver, path) {
  */
 function resolveCall(resolver, path) {
   const callee = path.get('callee');
-  return resolveRequire(resolver, path, callee)
+  return resolveModuleLoad(resolver, path, callee)
     ?? resolveObjectAssign(resolver, path, callee)
     ?? resolveRouterMethod(resolver, path, callee)
     ?? resolveOrdinaryCall(resolver, path, callee);
 }
 
-/** require('express'), require('./routes') */
-function resolveRequire(resolver, path, callee) {
-  if (!callee.isIdentifier({ name: 'require' }) || path.scope.getBinding('require')) return null;
+/** require('express'), require('./routes'), import('./routes') */
+function resolveModuleLoad(resolver, path, callee) {
+  const isRequire = callee.isIdentifier({ name: 'require' }) && !path.scope.getBinding('require');
+  const isDynamicImport = callee.isImport();
+  if (!isRequire && !isDynamicImport) return null;
   const specifier = path.node.arguments[0];
   if (!specifier || specifier.type !== 'StringLiteral') return [];
-  if (specifier.value === 'express') return [Value.express()];
+  const frameworkPackage = resolver.frameworks.packageValue(specifier.value);
+  if (frameworkPackage) return [frameworkPackage];
   const file = resolver.project.resolveImport(resolver.project.fileOf(path).filePath, specifier.value);
-  return file ? resolver.requireOf(file) : [];
+  if (!file) return [];
+  return isRequire ? resolver.requireOf(file) : [Value.module(file)]; // import() gives the module namespace
 }
 
 /** Object.assign(router, helpers) returns the router itself (factories attaching helpers to it). */
@@ -113,25 +116,23 @@ function resolveObjectAssign(resolver, path, callee) {
   return isObjectAssign ? resolver.resolve(path.get('arguments.0')) : null;
 }
 
-/** router.route('/x') starts a route chain; router.get(...) and router.use(...) return the router (chaining). */
+/** `router.use(...)`, `router.get(...)`, `router.route(...)`: what they return is up to the router's framework. */
 function resolveRouterMethod(resolver, path, callee) {
   if (!callee.isMemberExpression()) return null;
   const method = propertyName(callee);
-  if (method === 'route') {
-    const pathArgument = path.get('arguments.0');
-    const routePathsOfCall = routePaths(resolver, pathArgument) || [placeholder(resolver, pathArgument)];
-    const routers = resolver.resolve(callee.get('object')).filter((value) => value.kind === Kind.ROUTER);
-    return routers.flatMap((value) => routePathsOfCall.map((routePath) => Value.route(value.router, routePath)));
-  }
-  if (method === 'use' || ROUTE_METHODS.has(method)) return resolver.resolve(callee.get('object')).filter(isRouteTarget);
-  return null;
+  if (!resolver.frameworks.chainedMethods.has(method)) return null;
+  return resolver.resolve(callee.get('object'))
+    .filter(isRouteTarget)
+    .flatMap((receiver) => {
+      const framework = resolver.frameworks.of(receiver);
+      return framework.chainedMethods.has(method) ? framework.methodResult(resolver, receiver, method, path) : [];
+    });
 }
 
-/** express() makes an app, Router() a router, a project function returns whatever it returns. */
+/** A framework value (`express()`, `Router()`) is up to its framework; a project function returns what it returns. */
 function resolveOrdinaryCall(resolver, path, callee) {
   return resolver.resolve(callee).flatMap((called) => {
-    if (called.kind === Kind.EXPRESS) return [Value.router(resolver.router('app', path))];
-    if (called.kind === Kind.ROUTER_FACTORY) return [Value.router(resolver.router('router', path))];
+    if (called.kind === Kind.FRAMEWORK) return resolver.frameworks.of(called).call(resolver, called, path);
     if (called.kind === Kind.FUNCTION) return resolver.returnValues(called.declaration);
     return [];
   });
