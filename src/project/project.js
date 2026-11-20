@@ -1,15 +1,11 @@
 'use strict';
 const path = require('path');
-const { parse } = require('@babel/parser');
-const traverse = require('@babel/traverse').default;
 const { SOURCE_EXTENSIONS } = require('./files');
 const { PathAliases } = require('./pathAliases');
+const { SourceFile } = require('./sourceFile');
 
 /**
- * The parsed source files of the analyzed project and how they import each other.
- *
- * A SourceFile is { filePath, code, program, calls }: `program` is the Babel path of the whole file and
- * `calls` every call and `new` expression in it, which is where routes, mounts and routers come from.
+ * The source files of the analyzed project (see sourceFile.js) and how they import each other.
  */
 class Project {
   constructor(root) {
@@ -28,22 +24,10 @@ class Project {
     return path.relative(this.root, filePath);
   }
 
-  /** Parses a source file. A file that cannot be parsed is skipped with a warning. */
+  /** Adds a source file. A file that cannot be parsed is skipped with a warning. */
   addSource(filePath, code) {
     try {
-      const ast = parse(code, {
-        sourceType: 'unambiguous',
-        errorRecovery: true,
-        allowReturnOutsideFunction: true,
-        plugins: parserPlugins(filePath),
-      });
-      const file = { filePath, code, program: null, calls: [] };
-      traverse(ast, {
-        Program(program) { file.program = program; },
-        'CallExpression|NewExpression'(call) { file.calls.push(call); },
-      });
-      this.files.set(filePath, file);
-      this.fileByProgram.set(file.program.node, file);
+      this.files.set(filePath, new SourceFile(filePath, code, (file) => this.fileByProgram.set(file.program.node, file)));
     } catch (error) {
       this.warn(`could not parse ${this.relative(filePath)}: ${error.message}`);
     }
@@ -78,6 +62,43 @@ class Project {
     return null;
   }
 
+  /**
+   * The file and the files that can refer to what it defines: the files importing it, and in turn the files
+   * importing those that pass it on: re-export it (`export * from`), load it with require() or import(), or export
+   * a name they import from it (`import users from './users'; export default [users]`). Short of a value passed
+   * along at runtime, nothing else can reach the file's functions.
+   * @returns {Map<SourceFile, object[]>} each file found, with its import entries (see SourceFile) of files found
+   */
+  importersOf(file) {
+    if (!this.importedBy) this.indexImports();
+    const found = new Map([[file, []]]); // file -> its import entries of the files found
+    const passers = new Set([file]);
+    const passingOn = [file];
+    while (passingOn.length) {
+      for (const { importer, entry } of this.importedBy.get(passingOn.pop()) || []) {
+        if (!found.has(importer)) found.set(importer, []);
+        found.get(importer).push(entry);
+        if (!passers.has(importer) && passesOn(importer, entry)) {
+          passers.add(importer);
+          passingOn.push(importer);
+        }
+      }
+    }
+    return found;
+  }
+
+  indexImports() {
+    this.importedBy = new Map(); // SourceFile -> [{ importer: SourceFile, entry: the importer's import entry }]
+    for (const file of this.files.values()) {
+      for (const entry of file.imports) {
+        const imported = this.resolveImport(file.filePath, entry.source);
+        if (!imported || imported === file) continue;
+        if (!this.importedBy.has(imported)) this.importedBy.set(imported, []);
+        this.importedBy.get(imported).push({ importer: file, entry });
+      }
+    }
+  }
+
   /** Node's and TypeScript's lookup: exact file, added extension, then index file. */
   fileAt(base) {
     const withoutJs = base.replace(/\.[cm]?jsx?$/, ''); // TypeScript ESM imports './x.js' for x.ts
@@ -93,10 +114,7 @@ class Project {
   }
 }
 
-function parserPlugins(filePath) {
-  const typescript = /\.[cm]?tsx?$/.test(filePath);
-  const jsx = !typescript || filePath.endsWith('x'); // .js files may contain JSX; in TypeScript only .tsx
-  return ['decorators-legacy', ...(typescript ? ['typescript'] : []), ...(jsx ? ['jsx'] : [])];
-}
+/** Whether a file passes on what it imports with `entry`, see importersOf. */
+const passesOn = (file, entry) => entry.kind !== 'import' || entry.specifiers.some((specifier) => file.exportedNames.has(specifier.local));
 
 module.exports = { Project };

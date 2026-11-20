@@ -12,7 +12,8 @@ const path = require('path');
 const { Framework } = require('./framework');
 const { ROUTE_METHODS } = require('./httpMethods');
 const { Kind, Value } = require('../analysis/values');
-const { keyName, propertyName } = require('../analysis/ast');
+const { propertyName } = require('../analysis/ast');
+const { optionPath, stringOption } = require('./options');
 
 const FASTIFY = Value.framework('fastify', 'fastify'); // the module: fastify() creates an instance
 const PLUGIN_WRAPPER = Value.framework('fastify', 'fastify-plugin'); // fp(plugin): a plugin without encapsulation
@@ -73,6 +74,11 @@ class Fastify extends Framework {
     return [Value.router(resolver.router('fastify', 'plugin', functionPath))];
   }
 
+  /** register(plugin) and route(options) take one argument; shorthand routes a path ('' or '/...') and a handler. */
+  mayCollect(call) {
+    return call.method === 'register' || call.method === 'route' ? call.args >= 1 : call.args >= 2 && !call.notPath;
+  }
+
   collectCall(context, targets, method, callPath) {
     const instances = targets.filter((target) => target.kind === Kind.ROUTER).map((target) => target.router);
     if (method === 'register') this.collectPlugins(context, instances, callPath);
@@ -95,9 +101,10 @@ class Fastify extends Framework {
       this.plugins = new Set(); // set before filling: resolving a plugin argument may ask again and get the partial set
       let found = false;
       for (const file of resolver.project.sourceFiles()) {
-        for (const call of file.calls) {
-          const callee = call.get('callee');
-          if (!call.isCallExpression() || !callee.isMemberExpression() || propertyName(callee) !== 'register') continue;
+        for (const summary of file.callSummaries) {
+          if (summary.method !== 'register' || !summary.args) continue;
+          const call = file.callAt(summary);
+          if (!call || !call.isCallExpression()) continue;
           found = true;
           for (const plugin of this.registeredPlugins(resolver, call)) this.plugins.add(plugin.declaration.node);
         }
@@ -204,23 +211,6 @@ function collectRouteDeclarations(context, instances, callPath) {
 }
 
 // --- options objects ------------------------------------------------------------------------
-
-/** Path of the value of `key` in the first of the object literal values that has it (a method counts as its value). */
-function optionPath(objects, key) {
-  for (const object of objects) {
-    const property = object.literal.get('properties')
-      .find((p) => (p.isObjectProperty() || p.isObjectMethod()) && keyName(p.node) === key);
-    if (property) return property.isObjectMethod() ? property : property.get('value');
-  }
-  return null;
-}
-
-/** Strings an option can be ('GET', ['GET', 'HEAD'], a constant), a placeholder when unknown, null when absent. */
-function stringOption(resolver, objects, key) {
-  const option = optionPath(objects, key);
-  if (!option) return null;
-  return resolver.routePaths(option) || [resolver.placeholder(option)];
-}
 
 function booleanOption(objects, key) {
   const option = optionPath(objects, key);

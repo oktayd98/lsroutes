@@ -45,6 +45,17 @@ class Express extends Framework {
     return paths.map((routePath) => Value.route(receiver.router, routePath));
   }
 
+  /**
+   * `use(router)` takes one argument and a route needs a path and a handler, except on a `route('/x')` chain;
+   * a string not starting with '/' or '*' is no path (`config.get('port', 80)`).
+   * shortcut: a route chain is recognized by a route() call in the same file, so `route.get(h)` on a route
+   * imported from another file is missed; look at the receiver's value instead if that turns up.
+   */
+  mayCollect(call, file) {
+    if (call.method === 'use') return call.args >= 1;
+    return (call.args >= 2 && !call.notPath) || (call.args === 1 && file.callsMethod('route'));
+  }
+
   collectCall(context, targets, method, callPath) {
     const args = callPath.get('arguments');
     if (method === 'use') collectMounts(context, targets, args);

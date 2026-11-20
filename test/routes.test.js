@@ -3,11 +3,15 @@ const assert = require('node:assert');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
+// the footer ends with the run time, which differs on every run: `18 routes (0.42s)`, `18 routes (cached, 0.05s)`
+const TIMING = / \((cached, )?\d+\.\d\ds\)$/m;
+const withoutTiming = (stdout) => stdout.replace(TIMING, '');
+
 test('lists routes of the fixture project', () => {
   const r = spawnSync(process.execPath, [path.join(__dirname, '../bin/lsroutes.js'), path.join(__dirname, 'fixture')], { encoding: 'utf8', timeout: 10000, env: { ...process.env, FORCE_COLOR: '', NO_COLOR: '1' } });
   assert.strictEqual(r.status, 0, r.stderr);
   assert.match(r.stderr, /router at src\/orphan\.ts:2 is not mounted/);
-  assert.strictEqual(r.stdout, `\
+  assert.strictEqual(withoutTiming(r.stdout), `\
 ┌────────┬──────────────────────────┬───────────────────┬───────────────────────────┐
 │ Method │ Path                     │ Handler           │ Source                    │
 ├────────┼──────────────────────────┼───────────────────┼───────────────────────────┤
@@ -53,8 +57,12 @@ test('cache is invalidated when files change, are added or removed', () => {
   const run = () => spawnSync(process.execPath, [path.join(__dirname, '../bin/lsroutes.js'), dir], { encoding: 'utf8', timeout: 10000, env: { ...process.env, NO_COLOR: '1' } }).stdout;
   try {
     fs.writeFileSync(path.join(dir, 'app.js'), "const app = require('express')();\napp.get('/one', h);\n");
-    assert.match(run(), /\/one/);
-    assert.match(run(), /\/one/); // served from cache
+    const fresh = run();
+    assert.match(fresh, /\/one/);
+    assert.match(fresh, /^1 route \(\d+\.\d\ds\)$/m);
+    const cached = run();
+    assert.match(cached, /\/one/);
+    assert.match(cached, /^1 route \(cached, \d+\.\d\ds\)$/m);
     fs.writeFileSync(path.join(dir, 'app.js'), "const app = require('express')();\napp.get('/two', h);\n");
     assert.doesNotMatch(run(), /\/one/);
     fs.writeFileSync(path.join(dir, 'extra.js'), "const app = require('express')();\napp.post('/three', h);\n");
@@ -151,7 +159,7 @@ routers.forEach((r) => app.use('/users', r));
   // lsroutes' own source hit the same bug through `[...resolve(a), ...resolve(b)]`
   const own = cli(path.join(__dirname, '../bin'));
   assert.strictEqual(own.status, 0, own.stderr);
-  assert.strictEqual(own.stdout, 'No routes found.\n');
+  assert.match(own.stdout, /^No routes found \(\d+\.\d\ds\)\n$/);
 });
 
 test('lists routes of the Fastify fixture project', () => {
@@ -159,7 +167,7 @@ test('lists routes of the Fastify fixture project', () => {
   assert.strictEqual(r.status, 0, r.stderr);
   assert.strictEqual(r.stderr, '');
   // every expected route is commented next to its declaration in test/fastify-fixture
-  assert.strictEqual(r.stdout, `\
+  assert.strictEqual(withoutTiming(r.stdout), `\
 ┌────────┬───────────────────┬───────────────┬─────────────────────────────────┐
 │ Method │ Path              │ Handler       │ Source                          │
 ├────────┼───────────────────┼───────────────┼─────────────────────────────────┤
@@ -189,5 +197,34 @@ test('lists routes of the Fastify fixture project', () => {
 │ GET    │ /api/books        │ listBooks     │ src/routes/books/index.ts:2     │
 └────────┴───────────────────┴───────────────┴─────────────────────────────────┘
 14 routes
+`);
+});
+
+test('lists routes of the NestJS fixture project', () => {
+  const r = spawnSync(process.execPath, [path.join(__dirname, '../bin/lsroutes.js'), path.join(__dirname, 'nest-fixture'), '--no-cache'], { encoding: 'utf8', timeout: 10000, env: { ...process.env, FORCE_COLOR: '', NO_COLOR: '1' } });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stderr, '');
+  // every expected route is commented next to its decorator in test/nest-fixture
+  assert.strictEqual(withoutTiming(r.stdout), `\
+┌────────┬───────────────────────────┬───────────────────────────┬──────────────────────────────────┐
+│ Method │ Path                      │ Handler                   │ Source                           │
+├────────┼───────────────────────────┼───────────────────────────┼──────────────────────────────────┤
+│ GET    │ /health                   │ HealthController#check    │ src/misc.controller.ts:6         │
+├────────┼───────────────────────────┼───────────────────────────┼──────────────────────────────────┤
+│ POST   │ /v1/webhooks/stripe       │ WebhooksController#stripe │ src/misc.controller.ts:12        │
+│ GET    │ /api/v1/webhooks/status   │ WebhooksController#status │ src/misc.controller.ts:15        │
+├────────┼───────────────────────────┼───────────────────────────┼──────────────────────────────────┤
+│ GET    │ /api/v1/posts/:id         │ PostsController#show      │ src/posts.controller.ts:9        │
+│ GET    │ /api/v1/posts             │ PostsController#list      │ src/common/crud.controller.ts:4  │
+├────────┼───────────────────────────┼───────────────────────────┼──────────────────────────────────┤
+│ GET    │ /api/v1/users             │ UsersController#findAll   │ src/users/users.controller.ts:5  │
+│ GET    │ /api/v1/users/:id         │ UsersController#findOne   │ src/users/users.controller.ts:8  │
+│ POST   │ /api/v1/users             │ UsersController#create    │ src/users/users.controller.ts:11 │
+│ GET    │ /api/v2/users/:id/profile │ UsersController#profile   │ src/users/users.controller.ts:15 │
+│ GET    │ /api/v3/users/:id/profile │ UsersController#profile   │ src/users/users.controller.ts:15 │
+│ PUT    │ /api/v1/users/:id         │ UsersController#replace   │ src/users/users.controller.ts:18 │
+│ PUT    │ /api/v1/users/:id/replace │ UsersController#replace   │ src/users/users.controller.ts:18 │
+└────────┴───────────────────────────┴───────────────────────────┴──────────────────────────────────┘
+12 routes
 `);
 });

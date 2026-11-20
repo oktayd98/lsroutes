@@ -21,10 +21,11 @@ if (options.unknownOption) fail(`unknown option ${options.unknownOption}`);
 const root = path.resolve(options.dir || '.');
 if (!fs.statSync(root, { throwIfNoEntry: false })?.isDirectory()) fail(`${options.dir} is not a directory`);
 
-const { groups, warnings } = listRoutes(root, { cache: options.cache });
+const { groups, warnings, cached } = listRoutes(root, { cache: options.cache });
 for (const warning of warnings) console.error(warning);
-if (!groups.length) console.log('No routes found.');
-else process.stdout.write(renderTable(groups, { color: shouldUseColor(options.colorFlag, process.env, process.stdout) }));
+const note = `${cached ? 'cached, ' : ''}${(performance.now() / 1000).toFixed(2)}s`; // since the process started
+if (!groups.length) console.log(`No routes found (${note})`);
+else process.stdout.write(renderTable(groups, { color: shouldUseColor(options.colorFlag, process.env, process.stdout), note }));
 
 function fail(message) {
   console.error(`lsroutes: ${message}\nRun 'lsroutes --help' for usage.`);

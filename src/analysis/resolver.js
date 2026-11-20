@@ -1,7 +1,7 @@
 'use strict';
 const { Kind } = require('./values');
 const { RouterRegistry } = require('./routers');
-const { constructorOf } = require('./ast');
+const { constructorOf, callableNames } = require('./ast');
 const expressions = require('./expressions');
 const dataflow = require('./dataflow');
 const members = require('./members');
@@ -37,7 +37,10 @@ class Resolver {
     // `log` to each other) recomputing it at every visit is exponential
     this.provisional = new Map();
     this.loopElements = new Map(); // loop variable node -> [the one element being processed], see withLoopElement
-    this.callers = null; // function node -> call and new expressions invoking it, built on first use
+    this.callers = new Map(); // function node -> call and new expressions invoking it, for the calls indexed so far
+    this.indexedCalls = new Set(); // call summaries whose callee is resolved into `callers`, or queued for it
+    this.callsToIndex = []; // [file, call summary], see callersOf
+    this.indexing = false;
   }
 
   // --- questions the rules ask --------------------------------------------------------
@@ -102,15 +105,74 @@ class Resolver {
     return this.routers.at(framework, kind, creationPath);
   }
 
-  /** Forgets memoized results, for indexes that resolved expressions while they were half-built (see indexCallers). */
+  /** Forgets memoized results, for indexes that resolved expressions while they were half-built (see callersOf). */
   clearMemo() {
     this.memo.clear();
   }
 
-  /** Call and new expressions that invoke a function (or a class, through its constructor). */
+  /**
+   * Call and new expressions that invoke a function (or a class, through its constructor).
+   *
+   * Resolving every call of a large project would parse every file, so only calls that can reach the function
+   * are resolved, judged from the file summaries (see SourceFile):
+   * - in the function's own file and the files it is passed on to by imports (Project.importersOf) that import it:
+   *   by one of its names, as a namespace or with require(); a file importing only other names of a barrel cannot;
+   * - `x.name(...)` only when `name` is one of the function's names (callableNames), also as renamed by barrels;
+   * - `name(...)` with an imported `name` only when it imports one of those names; with a local `name` when that is
+   *   one of the names or, for a function that is not a method, a parameter or variable, which can hold it
+   *   (`const routes = require('./routes')`); never a global or another local function;
+   * - `super(...)` only for a constructor, in a class extending one of the names; `import(...)` never; other callees
+   *   (`require('./routes')(app)`) always.
+   * shortcut: a function passed as a value into a file that does not import it (`mountAll(app, [routes])` calling
+   * `routes(app)` in a helper file) is not followed; index the helper's importers too if real projects need it.
+   */
   callersOf(functionPath) {
-    if (!this.callers) this.indexCallers();
+    const file = this.project.fileOf(functionPath);
+    const importers = this.project.importersOf(file);
+    const names = reexportedNames(importers.keys(), callableNames(functionPath));
+    const byValue = !isMember(functionPath); // methods and constructors are called as `x.name()`, `new C()`, `super()`
+    for (const [importer, entries] of importers) {
+      if (importer !== file && !entries.some((entry) => importsOneOf(entry, names))) continue;
+      for (const call of importer.callSummaries) {
+        if (this.indexedCalls.has(call) || !mayCall(importer, call, names, byValue)) continue;
+        this.indexedCalls.add(call);
+        this.callsToIndex.push([importer, call]);
+      }
+    }
+    if (!this.indexing) this.indexQueuedCalls(); // while indexing, the asker gets the partial index, as below
     return this.callers.get(functionPath.node) || [];
+  }
+
+  /**
+   * Indexing does not depend on the question that asked for it, so it runs on a stack of its own: inside a deep
+   * question, MAX_DEPTH would cut the callees and leave the index incomplete for good. Calls queued meanwhile are
+   * indexed in the same loop, never on a stack of their own: the stack stays at most two MAX_DEPTHs deep.
+   */
+  indexQueuedCalls() {
+    if (!this.callsToIndex.length) return;
+    const outerQuestions = this.inProgress;
+    this.inProgress = new Set();
+    this.indexing = true;
+    try {
+      while (this.callsToIndex.length) {
+        const [file, summary] = this.callsToIndex.shift();
+        const call = file.callAt(summary);
+        if (call) this.indexCall(call);
+      }
+    } finally {
+      this.inProgress = outerQuestions;
+      this.indexing = false;
+    }
+    this.memo.clear(); // results cached while the index was half-built may miss call sites
+  }
+
+  indexCall(call) {
+    for (const callee of this.resolve(call.get('callee'))) {
+      const target = calledFunction(callee, call);
+      if (!target) continue;
+      if (!this.callers.has(target)) this.callers.set(target, []);
+      this.callers.get(target).push(call);
+    }
   }
 
   // --- loops ------------------------------------------------------------------------------
@@ -172,23 +234,54 @@ class Resolver {
       this.inProgress.delete(key);
     }
   }
+}
 
-  indexCallers() {
-    // set before filling: resolving a callee may itself ask for callers, and then gets the partial index
-    this.callers = new Map();
-    for (const file of this.project.sourceFiles()) {
-      for (const call of file.calls) {
-        for (const callee of this.resolve(call.get('callee'))) {
-          const target = calledFunction(callee, call);
-          if (!target) continue;
-          if (!this.callers.has(target)) this.callers.set(target, []);
-          this.callers.get(target).push(call);
+/** `names` plus what barrels among `files` re-export them as (`export { default as users } from './users'`). */
+function reexportedNames(files, names) {
+  files = [...files];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const file of files) {
+      for (const entry of file.imports) {
+        if (entry.kind !== 'reexport') continue;
+        for (const { imported, local } of entry.specifiers) {
+          if (names.has(imported) && !names.has(local)) added = names.add(local);
         }
       }
     }
-    this.memo.clear(); // results cached while the index was half-built may miss call sites
   }
+  return names;
 }
+
+/**
+ * Whether an import entry can bring in a function called `names`: by one of those names, as a namespace
+ * (`import * as routes`), or as a whole module (`require('./routes')`). A re-export only passes it on.
+ */
+const importsOneOf = (entry, names) => entry.kind === 'load'
+  || (entry.kind === 'import' && entry.specifiers.some(({ imported }) => imported === '*' || names.has(imported)));
+
+/** Whether a summarized call can invoke a function called `names`, see callersOf. */
+function mayCall(file, call, names, byValue) {
+  if (call.special === 'super') return names.has('constructor') && (call.callee === null || calls(file, call.callee, names, false));
+  if (call.special) return false; // import()
+  if (call.method !== null) return names.has(call.method);
+  return call.callee === null || calls(file, call.callee, names, byValue);
+}
+
+/**
+ * Whether `name` in a file can be a function called `names`: an import of one of them, a local of one of those
+ * names, or (byValue) a parameter or variable, which can hold any function.
+ */
+function calls(file, name, names, byValue) {
+  const binding = file.importedBinding(name);
+  if (binding) return names.has(binding.imported);
+  return names.has(name) || (byValue && file.valueNames.has(name));
+}
+
+/** A class method or constructor, or a method of an object literal (also `{ name: () => ... }`). */
+const isMember = (functionPath) => functionPath.isClassMethod() || functionPath.isClassPrivateMethod() || functionPath.isObjectMethod()
+  || functionPath.parentPath.isObjectProperty({ value: functionPath.node }) || functionPath.parentPath.isClassProperty({ value: functionPath.node });
 
 /** The function node a call runs: the function itself, or the constructor for `new SomeClass()`. */
 function calledFunction(callee, call) {

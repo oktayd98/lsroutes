@@ -17,11 +17,12 @@ class RouteCollector {
   collect() {
     const { frameworks } = this.resolver;
     for (const file of this.resolver.project.sourceFiles()) {
-      for (const call of inSourceOrder(file.calls)) {
-        const callee = call.get('callee');
-        if (!call.isCallExpression() || !callee.isMemberExpression()) continue;
-        const method = propertyName(callee);
-        if (frameworks.collectedMethods.has(method)) this.collectCall(call, callee, method);
+      // judged from the summaries first: a file is only parsed for paths if one of its calls may matter
+      const candidates = file.callSummaries.filter((call) => call.object !== 'Super' && frameworks.mayCollect(call, file)); // super.get() is never a router
+      for (const summary of inSourceOrder(candidates)) {
+        const call = file.callAt(summary);
+        const callee = call && call.get('callee');
+        if (call && call.isCallExpression() && callee.isMemberExpression()) this.collectCall(call, callee, summary.method);
       }
     }
     for (const framework of frameworks.all()) framework.collectProject(this.context);
@@ -101,9 +102,6 @@ class CollectContext {
 }
 
 /** Sorted by the method name's position, so `route('/x').put().delete()` lists PUT before DELETE. */
-function inSourceOrder(calls) {
-  const position = (call) => call.node.callee.property?.start ?? call.node.start;
-  return [...calls].sort((a, b) => position(a) - position(b));
-}
+const inSourceOrder = (summaries) => summaries.sort((a, b) => a.order - b.order);
 
 module.exports = { RouteCollector };

@@ -10,13 +10,13 @@ const MAGENTA = 35;
 const CYAN = 36;
 
 /**
- * The routes as a box-drawn table, groups separated by a divider, followed by the route count.
+ * The routes as a box-drawn table, groups separated by a divider, followed by the route count and `note`.
  *
  * @param {string[][][]} groups rows of [method, path, handler, location]
- * @param {{ color: boolean }} options
+ * @param {{ color: boolean, note?: string }} options
  * @returns {string}
  */
-function renderTable(groups, { color }) {
+function renderTable(groups, { color, note }) {
   const paint = (code, text) => (color && text ? `\x1b[${code}m${text}\x1b[0m` : text);
   const columnColors = [
     (method) => paint(`${BOLD};${METHOD_COLORS[method.trim()] || OTHER_METHOD_COLOR}`, method),
@@ -39,7 +39,7 @@ function renderTable(groups, { color }) {
     for (const cells of group) lines.push(row(cells, (cell, column) => columnColors[column](cell)));
   });
   lines.push(line('└', '┴', '┘'));
-  lines.push(paint(DIM, `${rows.length} route${rows.length === 1 ? '' : 's'}`));
+  lines.push(paint(DIM, `${rows.length} route${rows.length === 1 ? '' : 's'}${note ? ` (${note})` : ''}`));
   return lines.join('\n') + '\n';
 }
 

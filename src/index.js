@@ -1,6 +1,6 @@
 'use strict';
 /**
- * lsroutes: lists the routes of an Express or Fastify project by static analysis. Nothing from the project is executed.
+ * lsroutes: lists the routes of an Express, Fastify or NestJS project by static analysis. Nothing from the project is executed.
  *
  *   files      find the source files            project/files.js
  *   parse      parse them, resolve imports       project/project.js, project/pathAliases.js
@@ -22,18 +22,19 @@ const { cacheKey, readCache, writeCache } = require('./cache');
 /**
  * @param {string} root absolute path of the project directory
  * @param {{ cache?: boolean }} [options]
- * @returns {{ groups: string[][][], warnings: string[] }} groups of [method, path, handler, location] rows
+ * @returns {{ groups: string[][][], warnings: string[], cached: boolean }} groups of [method, path, handler, location]
+ *   rows; `cached` when the result comes from the cache
  */
 function listRoutes(root, { cache = true } = {}) {
   const filePaths = findProjectFiles(root);
   const contents = filePaths.map((filePath) => fs.readFileSync(filePath, 'utf8'));
   const key = cacheKey(filePaths, contents);
   const cached = cache && readCache(root, key);
-  if (cached) return cached;
+  if (cached) return { ...cached, cached: true };
 
   const result = analyze(root, filePaths, contents);
   writeCache(root, key, result);
-  return result;
+  return { ...result, cached: false };
 }
 
 function analyze(root, filePaths, contents) {

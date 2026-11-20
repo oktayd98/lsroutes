@@ -1,6 +1,6 @@
 # lsroutes
 
-List every endpoint of an Express or Fastify project, like `rails routes`.
+List every endpoint of an Express, Fastify or NestJS project, like `rails routes`.
 
 ```
 $ npx lsroutes
@@ -18,14 +18,14 @@ $ npx lsroutes
 │ GET    │ /                   │ home.index            │ src/index.js:11          │
 │ GET    │ /health             │ function              │ src/index.js:12          │
 └────────┴─────────────────────┴───────────────────────┴──────────────────────────┘
-8 routes
+8 routes (0.31s)
 ```
 
-Express and Fastify have no standard folder layout, so `lsroutes` doesn't guess from file names. It reads the code and follows your routers wherever they are defined and mounted, then prints each endpoint with its full path, its handler and the file and line where it is declared.
+Express and Fastify have no standard folder layout (and NestJS controllers can live anywhere), so `lsroutes` doesn't guess from file names. It reads the code and follows your routers wherever they are defined and mounted, then prints each endpoint with its full path, its handler and the file and line where it is declared.
 
 ## Usage
 
-Run it in the root of an Express or Fastify project (JavaScript or TypeScript):
+Run it in the root of an Express, Fastify or NestJS project (JavaScript or TypeScript):
 
 ```sh
 npx lsroutes              # scan the current directory
@@ -75,13 +75,25 @@ For Fastify it also understands:
 - `@fastify/autoload` with its rules: directory names as prefixes, index files, `autohooks` files, `autoPrefix` / `prefixOverride` exports, `options.prefix`, `dirNameRoutePrefix`, `routeParams` and `ignorePattern`; `dir` can be `path.join(__dirname, 'routes')`, `import.meta.dirname` or `fileURLToPath(new URL(...))`
 - instance methods that return the instance (`fastify().withTypeProvider()`, `addHook`, `decorate`, ...)
 
+For NestJS it reads the decorators from `@nestjs/common`:
+
+- `@Controller('users')`, `@Controller(['a', 'b'])`, `@Controller({ path, version })` with `@Get()`, `@Post(':id')`, `@Put(['a', 'b'])`, ... on its methods, also when the decorators come through `import * as common`
+- route methods inherited from a base class (`class UsersController extends CrudController`); a method overridden without a route decorator is no longer a route, as in Nest
+- `app.setGlobalPrefix('api', { exclude: [...] })`, with exclude rules as strings or `{ path, method }` and path-to-regexp patterns (`:id`, `(.*)`, `{/*splat}`)
+- URI versioning: `app.enableVersioning({ type: VersioningType.URI, defaultVersion, prefix })`, `@Version('2')`, version arrays and `VERSION_NEUTRAL`
+- one bootstrap file (`main.ts`) per app: in a monorepo, each controller takes the prefix and versioning of the bootstrap file in the nearest directory
+
 ### Grouping
 
 Routes are grouped by the router that defines them, mounted at a given prefix. A router file is a group, whatever it is named and wherever it lives. Within one router, routes are split again by their first static path segment (`/users/...` vs `/posts/...`), so an app that defines everything on a single `app` still gets readable groups. Parameters such as `:id` don't start a new group, and one-route segments of the same router share a group.
 
 ### Caching
 
-The result is cached in your OS temp directory. The cache key is a hash of every scanned source and `tsconfig`/`jsconfig` file's path and content plus the code of `lsroutes` itself, so upgrading the tool also invalidates it. Editing, adding or deleting a file triggers a fresh analysis. A `tsconfig` outside the scanned directory (in a parent directory, or extended from a package) is not part of the key: after changing one, run with `--no-cache`. See [Benchmark](#benchmark) for timings.
+The result is cached in your OS temp directory. The cache key is a hash of every scanned source and `tsconfig`/`jsconfig` file's path and content plus the code of `lsroutes` itself, so upgrading the tool also invalidates it. Editing, adding or deleting a file triggers a fresh analysis. The last line of the output says whether the result came from the cache and how long the run took: `8 routes (cached, 0.08s)`. A `tsconfig` outside the scanned directory (in a parent directory, or extended from a package) is not part of the key: after changing one, run with `--no-cache`. See [Benchmark](#benchmark) for timings.
+
+### Memory
+
+Parsed files take a lot of memory: about 70 bytes per byte of source once Babel's paths and scopes are built. So every file is parsed once for a small summary (its imports, exports and calls) and dropped; only the files the analysis has to look inside are parsed again and kept. That is decided from the summaries: a file with no call that can define a route, no NestJS controller and no call that can reach a function the analysis follows is never kept. On a NestJS monorepo of 13,000 files (75 MB of source) about 2,000 files are kept and the run needs about 1.7 GB, instead of over 5 GB.
 
 ### Skipped files
 
@@ -109,17 +121,19 @@ Results on an Apple M4, Node 24 (median of 5 runs):
 
 | Project | Files | Routes | Cold (`--no-cache`) | Cached |
 |---|---|---|---|---|
-| synthetic benchmark | 1,479 (32,713 lines) | 1,000 | 1.36 s | 0.09 s |
+| synthetic benchmark | 1,479 (32,713 lines) | 1,000 | 0.71 s | 0.09 s |
 
 On open-source projects (cold, `--no-cache`):
 
 | Project | Framework | Routes | Cold |
 |---|---|---|---|
-| large backend, plugins nested several levels | Fastify | 1,497 | 7.9 s |
-| server API in a monorepo | Fastify | 571 | 1.8 s |
-| storage API | Fastify | 128 | 1.4 s |
+| large backend, plugins nested several levels | Fastify | 1,497 | 4.1 s |
+| server API in a monorepo | Fastify | 571 | 1.2 s |
+| storage API | Fastify | 128 | 0.6 s |
 | small REST API | Fastify | 69 | 0.2 s |
 | demo app | Fastify (autoload) | 14 | 0.1 s |
+| media server | NestJS | 318 | 0.7 s |
+| Nx monorepo | NestJS | 149 | 0.4 s |
 
 A cached run of any of them takes about 0.1 s.
 
@@ -127,13 +141,14 @@ A cached run of any of them takes about 0.1 s.
 
 ## Output notes
 
-- **Handler** shows the last handler passed to the route (`usersController.list`, `UserController#me` for `this.me` inside a class). Inline functions (`(req, res) => ...`, `function (req, res) {...}`) show as *function*, in italics on terminals that support it.
+- **Handler** shows the last handler passed to the route (`usersController.list`, `UserController#me` for `this.me` inside a class, or for a NestJS controller method). Inline functions (`(req, res) => ...`, `function (req, res) {...}`) show as *function*, in italics on terminals that support it.
 - A prefix that can't be known without running the app (`app.use(process.env.PREFIX, router)`) is shown as a placeholder: `{process.env.PREFIX}/users`.
 - If a router is never mounted, or its mount can't be resolved, its routes are still listed without a prefix. When the project has an `express()` app, a warning is also printed on stderr. Without one (e.g. a package that only exports routers) there is nothing to mount on, so no warning is printed.
 
 ## Limitations
 
-- Express and Fastify only (JavaScript and TypeScript). Decorator-based frameworks like NestJS or `routing-controllers` are not supported yet.
+- Express, Fastify and NestJS only (JavaScript and TypeScript). Other decorator-based frameworks like `routing-controllers` are not supported yet.
+- NestJS: `RouterModule.register()` module prefixes are not applied, controllers declared through custom decorators (`applyDecorators(Controller(...))`) are not found, and a controller is listed even if no module registers it. The `host` option is ignored.
 - Routes registered dynamically are missed: routers stored under computed keys and registered through `Object.entries(...)`, or passed through project-specific wrappers that change the prefix. On the largest Fastify backend we tested, which does this for its integrations, about 85% of `route()` declarations are listed.
 - Path aliases are read from the nearest `tsconfig.json` / `jsconfig.json`. Bundler-only aliases (webpack, Vite) and `package.json` `imports` (`#routes/*`) are not resolved.
 - Method names computed at runtime (`router[method](...)`) are not detected.
@@ -141,6 +156,7 @@ A cached run of any of them takes about 0.1 s.
 - A router created in a shared base class (`class BaseController { router = Router() }`) is treated as one router for all subclasses, so each subclass's routes also appear under the other subclasses' mount paths. Routers created in each subclass (or its constructor) are fine.
 - Routes are listed group by group, in the order the analysis meets them (files alphabetically, then source order). This can differ from the order the framework matches them in.
 - Conditionally registered routes (`if (env === 'development')`) are always listed.
+- To keep memory low, calls are ruled out from their shape before anything is resolved (see [Memory](#memory)). This misses a few rare patterns: a route path that is a string not starting with `/` or `*`, `route.get(handler)` on a `router.route('/x')` result imported from another file, and a function passed as a value into a file that does not import it and called there (`mountAll(app, [users])` calling `users(app)` in a helper file).
 - Routers from other packages (`express-promise-router`, etc.) are not detected.
 
 ## Development
@@ -158,7 +174,7 @@ npm link       # makes the `lsroutes` command use your local copy
 bin/lsroutes.js          CLI: options, output, exit codes
 src/index.js             listRoutes(root): files -> parse -> collect -> report, with the cache
 src/cli/                 option parsing and help text, table rendering
-src/project/             finding files, parsing them, resolving imports and tsconfig path aliases
+src/project/             finding files, parsing them (sourceFile.js), resolving imports and tsconfig path aliases
 src/analysis/
   values.js              every kind of value an expression can evaluate to
   resolver.js            "what can this expression be?": the hub with cycle, depth and memo guards
@@ -167,13 +183,13 @@ src/analysis/
   members.js, modules.js rules for `x.name` and for imports, require() and exports
   routers.js             the app/router/plugin model
   collector.js           finds app.get(), router.use() ... calls and records them on routers
-src/frameworks/          one adapter per framework (express.js, fastify.js), see framework.js for the hooks
+src/frameworks/          one adapter per framework (express.js, fastify.js, nestjs.js), see framework.js for the hooks
 src/report/groups.js     full paths from the mount tree, grouping, warnings
 ```
 
 The rule modules only call back into the resolver, never into each other, so each one can be read on its own. To support a new kind of expression, add a rule to the table in `expressions.js`; to support a new kind of value, add it to `values.js`.
 
-Nothing outside `src/frameworks/` names a framework. An adapter tells the core what its packages are (`express`, `fastify`), what calling or instantiating them creates, what a method called on one of its routers returns, and which of those calls define routes or mount routers. To support another framework, write an adapter extending `Framework` in `src/frameworks/framework.js` and add it to `createFrameworks()` in `src/frameworks/index.js`.
+Nothing outside `src/frameworks/` names a framework. An adapter tells the core what its packages are (`express`, `fastify`, `@nestjs/common`), what calling or instantiating them creates, what a method called on one of its routers returns, and which of those calls define routes or mount routers. Frameworks whose routes are not method calls (NestJS decorators) collect them in a pass over the whole project (`collectProject`). To support another framework, write an adapter extending `Framework` in `src/frameworks/framework.js` and add it to `createFrameworks()` in `src/frameworks/index.js`.
 
 ## License
 

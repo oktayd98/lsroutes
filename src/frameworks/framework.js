@@ -10,8 +10,8 @@
  *                            (express.Router, express(), new Hono(), ...)
  *   chainedMethods,          what `router.method(...)` returns: usually the router itself (chaining)
  *   methodResult
- *   collectedMethods,        which `router.method(...)` calls define routes or mount routers, and recording them
- *   collectCall
+ *   collectedMethods,        which `router.method(...)` calls define routes or mount routers, and recording them;
+ *   mayCollect, collectCall  mayCollect rules calls out from their summary alone, before anything is resolved
  *   parameterValues          extra values for a function parameter (a Fastify plugin's instance parameter)
  *   collectProject           a pass over the whole project, for frameworks whose routes are not method calls
  *                            (NestJS decorators)
@@ -50,6 +50,15 @@ class Framework {
   /** Values of `router.method(...)` for a method in chainedMethods; `receiver` is a router or route value. */
   methodResult(resolver, receiver, method, callPath) {
     return [];
+  }
+
+  /**
+   * False when a call to a method in collectedMethods cannot define a route or mount, judging from its summary
+   * (see SourceFile: argument count, method name) and its file: such calls are skipped without parsing the file
+   * for paths, which is what keeps memory low on large projects. `Map.get(key)` has too few arguments, say.
+   */
+  mayCollect(call, file) {
+    return true;
   }
 
   /** Records the routes or mounts made by `router.method(...)` for a method in collectedMethods. */

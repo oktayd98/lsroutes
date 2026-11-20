@@ -22,12 +22,14 @@ function requireOf(resolver, file) {
   return hasCommonJsDefault(file) ? exportOf(resolver, file, 'default') : [Value.module(file)];
 }
 
-const hasCommonJsDefault = (file) => file.program.node.body.some((statement) =>
-  statement.type === 'TSExportAssignment'
-  || (statement.type === 'ExpressionStatement' && statement.expression.type === 'AssignmentExpression' && isModuleExports(statement.expression.left)));
+const hasCommonJsDefault = (file) => file.commonJsDefault; // `module.exports = ...` or `export = ...`, see SourceFile
 
-/** Values a file exports under `name` ('default' for the default export), following re-exports. */
+/**
+ * Values a file exports under `name` ('default' for the default export), following re-exports. Files that do not
+ * export the name are ruled out from their summary, so a barrel of 100 `export * from` lines does not parse 100 files.
+ */
 function exportOf(resolver, file, name) {
+  if (!file.mayExport(name)) return [];
   return resolver.guard(`${file.filePath}#${name}`, () =>
     file.program.get('body').flatMap((statement) => exportedBy(resolver, file, statement, name)));
 }
